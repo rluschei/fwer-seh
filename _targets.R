@@ -13,7 +13,7 @@ sim <- function(N, EHF, CHF, test, rate, seed, alloc, case, alpha = 0.025, sd = 
   pi <- runif(3); pi <- pi / sum(pi)
 
   Theta <- gen.Theta(EHF, pi, case, rate)
-  
+  mu.true <- gen.mu.true(Theta, CHF)
   delta <- switch(alloc,
                   "A" = rep(0.5, 3),
                   "B" = rep(0.33, 3),
@@ -25,10 +25,9 @@ sim <- function(N, EHF, CHF, test, rate, seed, alloc, case, alpha = 0.025, sd = 
     n <- sizes(N, pi, delta, alloc)
     if(alloc == "D") delta <- n[,1] / rowSums(n)
     
-    mu.true <- gen.mu.true(Theta, CHF)
     mu.est <- gen.mu.est(mu.true, n, sd)
     sd.est <- gen.sd.est(sd, N)
-    perform_test(n, N, case, test, pi, alpha, sd.est, Nboot, Theta, EHF, CHF, delta, mu.est)
+    perform_test(n, N, case, test, pi, alpha, sd.est, Nboot, Theta, EHF, CHF, delta, mu.est, rate)
   })
   
   mean(results)
@@ -52,8 +51,8 @@ list(
       N = c(250, 500, 1000),
       EHF = c(0, 1, 10),
       CHF = c(0, 1, 10),
-      test = c("anova+t", "anova+boot", "marg+t", "marg+boot", "marg+shr+boot", 
-               "strat+boot", "rem"),
+      test = c("anova+t", "anova+boot", "marg+t", "marg+boot", "marg+shr+t", 
+               "marg+shr+boot", "strat+boot", "rem"),
       rate = c("fwer", "power"),
       alloc = c("A", "B", "C", "D"),
       case = c("nested", "overlap"),

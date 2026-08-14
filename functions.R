@@ -97,12 +97,12 @@ gen.Theta <- function(EHF, pi, case, rate) {
   }
 }
 
-perform_test <- function(n, N, case, test, pi, alpha, sd, Nboot, Theta, EHF, CHF, delta, mu){
-  if(test == "marg+t") return(marg.test(n, case, alpha, Theta, CHF, sd, N, mu))
-  if(test %in% c("anova+boot", "marg+boot", "marg+shr+boot", "strat+boot")) return(boot.test(alpha, Nboot, test, Theta, sd, CHF, n, case, N, delta, mu))
-  if(test == "anova+t") return(anova.test(n, case, alpha, sd, Theta, CHF, mu, N))
-  if(test == "rem") return(rem(n, case, alpha, Theta, CHF, sd))
-  if(test == "marg+shr+t") return(marg.test(n, case, alpha, Theta, CHF, sd, N, mu, shr = T))
+perform_test <- function(n, N, case, test, pi, alpha, sd, Nboot, Theta, EHF, CHF, delta, mu, rate){
+  if(test == "marg+t") return(marg.test(n, case, alpha, Theta, CHF, sd, N, mu, shr = F, rate))
+  if(test %in% c("anova+boot", "marg+boot", "marg+shr+boot", "strat+boot")) return(boot.test(alpha, Nboot, test, Theta, sd, CHF, n, case, N, delta, mu, rate))
+  if(test == "anova+t") return(anova.test(n, case, alpha, sd, Theta, CHF, mu, N, rate))
+  if(test == "rem") return(rem(n, case, alpha, Theta, CHF, sd, rate))
+  if(test == "marg+shr+t") return(marg.test(n, case, alpha, Theta, CHF, sd, N, mu, shr = T, rate))
 }
 
 gen.pops.list <- function(case){
@@ -157,12 +157,12 @@ gen.mu.est <- function(mu.true, n, sd){
   )
 }
 
-anova.test <- function(n, case, alpha, sd, Theta, CHF, mu, N){
+anova.test <- function(n, case, alpha, sd, Theta, CHF, mu, N, rate){
   rho <- corr(n, case)
   t <- t.anova(case, n, sd, mu)
   c <- rep(crit.anova(rho, alpha, N), 2)
-  if(any(t > c)) return(1)
-  return(0)
+  if (rate == "fwer"){if(any(t > c)) return(1) else return(0)}
+  if(rate == "power") return(sum(t > c)/2)
 }
 
 pop.var <- function(pops, Tmt, mu, n, sd){
@@ -179,7 +179,7 @@ t.marg <- function(case, n, sd, mu, boot = F, shr = F) {
   for (i in 1:2) {
     pops <- pops_list[[i]]
     num <- mean_diff(pops, n, mu.orig)
-    if(shr) mu <- js(mu.orig, n, sd, pops)
+    if(shr) mu <- eb(mu.orig, n, sd, pops)
     varT <- pop.var(pops, "T", mu, n, sd)
     varC <- pop.var(pops, "C", mu, n, sd)
     nT <- sum(n[pops, "T"])
@@ -196,14 +196,14 @@ gen.sd.est <- function(sd, N){
   sqrt(rchisq(1, N - 6) * sd^2 / (N - 6))
 }
 
-marg.test <- function(n, case, alpha, Theta, CHF, sd, N, mu, shr = F){
+marg.test <- function(n, case, alpha, Theta, CHF, sd, N, mu, shr, rate){
   marg <- t.marg(case, n, sd, mu, shr)
   t <- marg[[1]]
   df <- marg[[2]]
   rho <- corr(n, case)
   c <- c(crit.marg(rho, df[1], alpha), crit.marg(rho, df[2], alpha))
-  if (any(t > c)) return(1)
-  return(0)
+  if (rate == "fwer"){if(any(t > c)) return(1) else return(0)}
+  if(rate == "power") return(sum(t > c)/2)
 }
 
 
@@ -262,7 +262,7 @@ t.boot <- function(case, n, sd, Nboot, test, N, delta, mu) {
   }))
 }
 
-boot.test <- function(alpha, Nboot, test, Theta, sd, CHF, n, case, N, delta, mu){
+boot.test <- function(alpha, Nboot, test, Theta, sd, CHF, n, case, N, delta, mu, rate){
   if(test == "anova+boot") t <- t.anova(case, n, sd, mu)
   if(test == "marg+boot") t <- t.marg(case, n, sd, mu, boot = T)[[1]]
   if(test == "marg+shr+boot") t <- t.marg(case, n, sd, mu, boot = T, shr = T)[[1]]
@@ -272,8 +272,8 @@ boot.test <- function(alpha, Nboot, test, Theta, sd, CHF, n, case, N, delta, mu)
   p1 <- sum(max >= t[1])/Nboot
   p2 <- sum(max >= t[2])/Nboot
   p <- c(p1, p2)
-  if(any(p <= alpha, na.rm = T)) return(1)
-  return(0)
+  if(rate == "fwer"){if(any(p <= alpha)) return(1) else return(0)}
+  if(rate == "power") return(sum(p <= alpha)/2)
 }
 
 crit.boot <- function(alpha, Nboot, test, n, case, N, delta, sd, mu){
@@ -289,14 +289,40 @@ js <- function(mu, n, sd, pops) {
   for (j in 1:ncol(mu)) {
     mu_j <- mu[pops, j]
     mu_bar <- mean(mu_j)
-    s2 <- sum(mu_j^2 * n[pops,j])/sd^2
-    shrinkage <- if (s2 > 0) (k - 2) / s2 else 0
-    mu.js[pops, j] <- 1 - shrinkage * (mu_j - mu_bar) + mu_bar
+    s2 <- sum((mu_j - mu_bar)^2 * n[pops,j])/sd^2
+    shrinkage <- if (s2 > 0) (k - 3) / s2 else 0
+    mu.js[pops, j] <- (1 - shrinkage) * (mu_j - mu_bar) + mu_bar
   }
   
   rownames(mu.js) <- rownames(mu)
   colnames(mu.js) <- colnames(mu)
   mu.js
+}
+
+eb <- function(mu, n, sd, pops) {
+  mu.eb <- mu
+  k <- length(pops)
+  
+  for (j in 1:ncol(mu)) {
+    y <- mu[pops, j]
+    y_bar <- mean(y)
+    
+    v <- sd^2 / n[pops, j]
+    a <- 1 / v
+    m.fe <- sum(a * y) / sum(a)
+    Q <- sum(a * (y - m.fe)^2)
+    C <- sum(a) - sum(a^2) / sum(a)
+    tau2 <- if (C > 0) max(0, (Q - (k - 1)) / C) else 0
+    
+    B <- tau2 / (tau2 + v)
+    
+    mu.eb[pops, j] <- y_bar + B * (y - y_bar)
+  }
+  
+  rownames(mu.eb) <- rownames(mu)
+  colnames(mu.eb) <- colnames(mu)
+  
+  mu.eb
 }
 
 generate_sample <- function(n, mu, sd){
@@ -314,7 +340,7 @@ generate_sample <- function(n, mu, sd){
   )
 }
 
-rem <- function(n, case, alpha, Theta, CHF, sd){
+rem <- function(n, case, alpha, Theta, CHF, sd, rate){
   mu.true <- gen.mu.true(Theta, CHF)
   sample <- generate_sample(n, mu.true, sd)
   
@@ -346,7 +372,7 @@ rem <- function(n, case, alpha, Theta, CHF, sd){
   )
   p <- ifelse(coef_signs > 0,  p, 1-p)
   
-  if(any(p <= alpha/2)) return(1)
-  return(0)
+  if(rate == "fwer"){ if(any(p <= alpha/2)) return(1) else return(0)}
+  if(rate == "power") return(sum(p <= alpha/2)/2)
 }
 
